@@ -232,12 +232,28 @@ class WalkingPad:
         finally:
             self._cp_waiters.pop(op, None)
 
-    async def _control(self, payload: bytes) -> p.ControlResponse:
-        """Request control, then send — the KS Fit app does this before every command."""
-        rc = await self._cp(p.cmd_request_control())
-        if not rc.ok:
-            raise ControlError(p.Op.REQUEST_CONTROL, rc.result)
-        r = await self._cp(payload)
+    async def _control(
+        self, payload: bytes, verify: Callable[[], bool] | None = None, verify_timeout: float = 6.0
+    ) -> p.ControlResponse | None:
+        """Request control, then send — the KS Fit app does this before every command.
+
+        The pad occasionally drops a Control Point indication even though the
+        command took effect. If ``verify`` is given, a missing indication is
+        tolerated when ``verify()`` becomes true from live data; returns None then.
+        """
+        try:
+            rc = await self._cp(p.cmd_request_control())
+            if not rc.ok:
+                raise ControlError(p.Op.REQUEST_CONTROL, rc.result)
+        except asyncio.TimeoutError:
+            log.warning("no indication for REQUEST_CONTROL; continuing")
+        try:
+            r = await self._cp(payload)
+        except asyncio.TimeoutError:
+            if verify and await self.wait_for(verify, verify_timeout):
+                log.warning("no indication for op 0x%02x, but live data confirms it took effect", payload[0])
+                return None
+            raise WalkingPadError(f"no response to op 0x{payload[0]:02x} and no observed effect") from None
         if not r.ok:
             raise ControlError(payload[0], r.result)
         return r
@@ -252,8 +268,9 @@ class WalkingPad:
 
     async def start(self, wait: bool = True, timeout: float = 20.0) -> None:
         """Start or resume. With ``wait``, returns once the belt reports speed > 0 (~5 s incl. countdown)."""
-        await self._control(p.cmd_start())
-        if wait and not await self.wait_for(lambda: self.data.moving, timeout):
+        moving = lambda: self.data.moving  # noqa: E731
+        await self._control(p.cmd_start(), verify=moving, verify_timeout=timeout)
+        if wait and not await self.wait_for(moving, timeout):
             raise WalkingPadError("belt did not start")
 
     async def set_speed(self, kmh: float, settle: float = 2.0) -> float:
@@ -267,13 +284,19 @@ class WalkingPad:
         if not self.data.moving:
             await self.start()
             await asyncio.sleep(settle)  # let the motor settle before the first speed change
-        await self._control(p.cmd_set_speed(kmh))
+
+        def applied() -> bool:
+            ev = self.last_event
+            return (ev is not None and ev.target_speed_kmh == kmh) or abs(self.data.speed_kmh - kmh) < 0.05
+
+        await self._control(p.cmd_set_speed(kmh), verify=applied)
         return kmh
 
     async def pause(self, wait: bool = True, timeout: float = 15.0) -> None:
         """Pause (belt ramps down, session kept). The safe way to halt the belt."""
-        await self._control(p.cmd_pause())
-        if wait and not await self.wait_for(lambda: not self.data.moving, timeout):
+        stopped = lambda: not self.data.moving  # noqa: E731
+        await self._control(p.cmd_pause(), verify=stopped, verify_timeout=timeout)
+        if wait and not await self.wait_for(stopped, timeout):
             raise WalkingPadError("belt did not stop after pause")
 
     halt = pause
@@ -282,7 +305,9 @@ class WalkingPad:
         """End the session (pausing first if moving). Counters reset to zero."""
         if self.data.moving:
             await self.pause()
-        await self._control(p.cmd_stop())
+        await self._control(
+            p.cmd_stop(), verify=lambda: self.data.elapsed_s == 0 and not self.data.moving
+        )
 
     @property
     def max_speed_kmh(self) -> float:

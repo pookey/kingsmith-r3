@@ -72,6 +72,7 @@ asyncio.run(main())
 
 - The pad has **no application-level watchdog**. If your program crashes or disconnects while the belt runs, **the belt keeps running**. `WalkingPad` pauses on exiting the `async with` block, but it can't help if the process is killed.
 - **STOP is refused while the belt is moving.** You must PAUSE first, which `pad.stop()` does for you. A raw STOP while running returns `OPERATION_FAILED` and the belt keeps going.
+- The pad occasionally drops a command's confirmation even though the command worked. The client then checks the live data, and only raises an error if the command had no visible effect.
 - After the Supplement handshake, the pad **stops sending live data while idle**. It only sends data while the belt moves. `WalkingPad(supplement=False)` skips the handshake and keeps the 1 Hz stream; `watch` does this.
 - After connecting, the pad sometimes ignores subscription (CCCD) writes, so no data arrives. The client checks that telemetry is flowing and resubscribes. Never drive the belt on a connection you aren't receiving data on, because you can't confirm it stopped.
 
@@ -94,6 +95,7 @@ asyncio.run(main())
 | `pklg_parse.py` | Decoder for Apple PacketLogger iPhone captures |
 | `supp_probe.py` | Supplement-channel probe |
 | `ftms_test.py`, `run_session.py`, `halt.py` | Scripted control and halting |
+| `library_smoke.py` | Hardware smoke test of the library: start, speeds, clamping, pause/resume, end. **Moves the belt.** |
 
 Captures are written to `captures/`, which is git-ignored because it holds device addresses.
 

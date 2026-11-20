@@ -77,6 +77,7 @@ SUPP 72 00 00 00 72         -> 72 80 24 <props>     property list
 ## 4. FTMS control ✅
 
 - The R3 is **spec-compliant**. Every command gets a Control Point indication `80 <op> <result>`.
+- ⚠️ **Rarely, the pad drops the indication even though the command took effect.** We saw a STOP with no `80 08 01 01` while the session still ended. Confirm the effect from live data (speed, FM Status, counters) rather than relying only on the indication.
 - **REQUEST_CONTROL (`00`) is required on each connection.** Without it, commands return `05`. KS Fit sends it before every command.
 
 | Command | Bytes | Response | Behaviour |
