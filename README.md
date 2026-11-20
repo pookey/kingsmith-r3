@@ -113,6 +113,17 @@ To capture the KS Fit app yourself:
 
 PRs and captures from other R3 owners are welcome.
 
+## Upstream contributions
+
+These are R3 fixes and findings contributed back to other projects:
+
+- [mcdax/walkingpad-controller#8](https://github.com/mcdax/walkingpad-controller/pull/8): `stop()` pauses first, because the R3 rejects STOP while running. Also adds `KS-AP-*` detection.
+- [mcdax/walkingpad-controller#9](https://github.com/mcdax/walkingpad-controller/pull/9): Supplement protocol and R3 behaviour, added to their protocol reference.
+- [mcdax/hass-walkingpad#6](https://github.com/mcdax/hass-walkingpad/pull/6): Home Assistant Bluetooth discovery for `KS-AP-*`.
+- [jrosskopf/padctl#2](https://github.com/jrosskopf/padctl/pull/2): pause sends `08 02` instead of STOP, and the FTMS Machine Status codes are fixed.
+
+[python-pyftms](https://github.com/dudanov/python-pyftms), and so the generic [hassio-ftms](https://github.com/dudanov/hassio-ftms) integration, already parses R3 Treadmill Data correctly, including steps.
+
 ## Credits / prior art
 
 - [ph4-walkingpad](https://github.com/ph4r05/ph4-walkingpad), the legacy WiLink protocol.
