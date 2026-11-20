@@ -1,0 +1,35 @@
+[project]
+name = "kingsmith-r3"
+version = "0.1.0"
+description = "Control and read a KingSmith R3 walking pad (KS-AP-RQ3) over Bluetooth LE — FTMS plus KingSmith's vendor channel"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = ["bleak>=0.22"]
+keywords = ["kingsmith", "walkingpad", "treadmill", "ftms", "bluetooth", "ble", "bleak"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Framework :: AsyncIO",
+    "Topic :: Home Automation",
+    "Topic :: System :: Hardware",
+]
+
+[project.scripts]
+kingsmith-r3 = "kingsmith_r3.cli:main"
+
+[project.urls]
+Repository = "https://github.com/pookey/kingsmith-r3"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kingsmith_r3"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
