@@ -88,8 +88,12 @@ SUPP 72 00 00 00 72         -> 72 80 24 <props>     property list
 | Pause | `08 02` | `80 08 01 02` | Belt ramps down over ~4–6 s. Elapsed time freezes and the session is kept. Then FM Status `02 02`, Training Status `01 0f`. |
 | Stop (end session) | `08 01` | `80 08 01 01` **only when paused** | FM Status `02 01`, Training Status `01 01`, counters reset to 0 |
 | Stop while running | `08 01` | `80 08 04 01` OPERATION_FAILED | ⚠️ **the belt keeps running** |
+| Pause at rest (idle, or already paused) | `08 02` | `80 08 04 02` | no effect; harmless |
+| Stop with no session | `08 01` | `80 08 04 01` | no effect |
+| Pause or Stop **during the start countdown** | `08 02` / `08 01` | `80 08 04 xx` | ⚠️ **both are refused, and the belt starts anyway** when the countdown ends |
 | Reset | `01` | `80 01 05` before control | not useful |
 
+- ✅ **A START can't be cancelled.** From the moment START is accepted until the belt moves (~4 s: Training Status `03 0e "3".."0"`, then `01 0d`, FM Status `04`, then speed > 0), the pad refuses PAUSE and STOP, and Treadmill Data reads 0 km/h. To halt, wait for the first frame with speed > 0, then PAUSE. That takes about 1 s at 1 km/h. This applies to starts from the remote or app too, so a speed of 0 alone doesn't prove the belt will stay still. Verified 2026-11-20.
 - Setting the speed 3 s after the belt starts moving is fine. Setting it to 12.0 directly from 1.0 works, reaching 12.0 in ~3 s.
 - No cold-start disconnects were seen, unlike some other KingSmith FTMS models.
 
@@ -213,4 +217,5 @@ The response payload is repeated `(u16le id, u16le value)` pairs. The ids match 
 - There's no application-level keepalive or watchdog. **A disconnect doesn't stop the belt.**
 - Always halt with PAUSE (`08 02`), and confirm that Treadmill Data reaches 0.
 - STOP while running is refused.
+- PAUSE and STOP during the 3-2-1 start countdown are refused, and the belt starts anyway. Pause it as soon as it moves.
 - Don't trust a connection that isn't delivering Treadmill Data: you can't verify the belt's state.

@@ -21,6 +21,10 @@ log = logging.getLogger(__name__)
 _SUBSCRIBE_ATTEMPTS = 4
 _TELEMETRY_TIMEOUT = 2.5
 _CCCD_GAP = 0.2
+# After START the pad runs a ~4 s 3-2-1 countdown at 0 km/h. During it, PAUSE
+# and STOP are both refused and the belt starts anyway once it ends, so a halt
+# requested then must wait for the belt to move and pause it straight away.
+_COUNTDOWN_GRACE = 8.0
 
 
 class WalkingPadError(Exception):
@@ -63,8 +67,10 @@ class WalkingPad:
     always-streaming connection (no properties / speed-limit info).
 
     Safety: leaving the ``async with`` block pauses the belt if it is still
-    moving (``pause_on_exit=True``). The pad has no application-level
-    watchdog — if your program dies without pausing, the belt keeps running.
+    moving or about to start (``pause_on_exit=True``). The pad has no
+    application-level watchdog — if your program dies without pausing, the
+    belt keeps running. A START cannot be cancelled during its 3-2-1
+    countdown; ``pause()`` then waits for the belt to move and pauses it.
     """
 
     def __init__(
@@ -103,6 +109,7 @@ class WalkingPad:
         self._cp_waiters: dict[int, asyncio.Future] = {}
         self._supp_waiters: list[tuple[Callable[[p.SuppFrame], bool], asyncio.Future]] = []
         self._td_event = asyncio.Event()
+        self._start_sent_at: float | None = None
 
     # ------------------------------------------------------------ lifecycle
 
@@ -112,7 +119,7 @@ class WalkingPad:
 
     async def __aexit__(self, *exc) -> None:
         try:
-            if self.pause_on_exit and self.connected and self.data.moving:
+            if self.pause_on_exit and self.connected and (self.data.moving or self.starting):
                 log.info("pausing belt on exit")
                 await self.pause()
         finally:
@@ -189,6 +196,8 @@ class WalkingPad:
     def _handle_td(self, _s, d: bytearray) -> None:
         self.data = p.parse_treadmill_data(bytes(d))
         self.data_time = time.monotonic()
+        if self.data.moving:
+            self._start_sent_at = None
         self._td_event.set()
         if self.on_data:
             self.on_data(self.data)
@@ -266,9 +275,23 @@ class WalkingPad:
             await asyncio.sleep(0.2)
         return pred()
 
+    @property
+    def starting(self) -> bool:
+        """True while a start is under way but the belt isn't moving yet (countdown).
+
+        Covers our own START and starts from the remote or another app (seen
+        via Training Status).
+        """
+        if self.data.moving:
+            return False
+        if self.training and self.training.state in (p.TrainingState.COUNTDOWN, p.TrainingState.RUNNING):
+            return True
+        return self._start_sent_at is not None and time.monotonic() - self._start_sent_at < _COUNTDOWN_GRACE
+
     async def start(self, wait: bool = True, timeout: float = 20.0) -> None:
         """Start or resume. With ``wait``, returns once the belt reports speed > 0 (~5 s incl. countdown)."""
         moving = lambda: self.data.moving  # noqa: E731
+        self._start_sent_at = time.monotonic()
         await self._control(p.cmd_start(), verify=moving, verify_timeout=timeout)
         if wait and not await self.wait_for(moving, timeout):
             raise WalkingPadError("belt did not start")
@@ -293,18 +316,36 @@ class WalkingPad:
         return kmh
 
     async def pause(self, wait: bool = True, timeout: float = 15.0) -> None:
-        """Pause (belt ramps down, session kept). The safe way to halt the belt."""
+        """Pause (belt ramps down, session kept). The safe way to halt the belt.
+
+        The pad refuses PAUSE when the belt is already at rest (idle or
+        paused); that is not an error. It also refuses PAUSE during the
+        3-2-1 start countdown and then starts the belt anyway: in that case
+        this waits for the belt to move and pauses it straight away.
+        """
         stopped = lambda: not self.data.moving  # noqa: E731
-        await self._control(p.cmd_pause(), verify=stopped, verify_timeout=timeout)
+        try:
+            await self._control(p.cmd_pause(), verify=stopped, verify_timeout=timeout)
+        except ControlError:
+            if self.data.moving:
+                raise
+            if not self.starting:
+                log.debug("PAUSE refused at rest; nothing to pause")
+                return
+            log.warning("PAUSE refused during start countdown; pausing as soon as the belt moves")
+            if not await self.wait_for(lambda: self.data.moving, _COUNTDOWN_GRACE):
+                if self.starting:
+                    raise WalkingPadError("start countdown did not finish; belt state unknown") from None
+                return
+            await self._control(p.cmd_pause(), verify=stopped, verify_timeout=timeout)
         if wait and not await self.wait_for(stopped, timeout):
             raise WalkingPadError("belt did not stop after pause")
 
     halt = pause
 
     async def stop(self) -> None:
-        """End the session (pausing first if moving). Counters reset to zero."""
-        if self.data.moving:
-            await self.pause()
+        """End the session (pausing first, including during a start countdown). Counters reset to zero."""
+        await self.pause()
         await self._control(
             p.cmd_stop(), verify=lambda: self.data.elapsed_s == 0 and not self.data.moving
         )

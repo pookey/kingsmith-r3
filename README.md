@@ -72,6 +72,7 @@ asyncio.run(main())
 
 - The pad has **no application-level watchdog**. If your program crashes or disconnects while the belt runs, **the belt keeps running**. `WalkingPad` pauses on exiting the `async with` block, but it can't help if the process is killed.
 - **STOP is refused while the belt is moving.** You must PAUSE first, which `pad.stop()` does for you. A raw STOP while running returns `OPERATION_FAILED` and the belt keeps going.
+- **A start can't be cancelled during its 3-2-1 countdown.** The pad refuses both PAUSE and STOP, then starts the belt at 1 km/h anyway. `pad.pause()`, `pad.stop()` and leaving the `async with` block detect the countdown (your own START, or one from the remote or app), wait for the belt to move, and pause it straight away. On the R3 the belt runs for about a second.
 - The pad occasionally drops a command's confirmation even though the command worked. The client then checks the live data, and only raises an error if the command had no visible effect.
 - After the Supplement handshake, the pad **stops sending live data while idle**. It only sends data while the belt moves. `WalkingPad(supplement=False)` skips the handshake and keeps the 1 Hz stream; `watch` does this.
 - After connecting, the pad sometimes ignores subscription (CCCD) writes, so no data arrives. The client checks that telemetry is flowing and resubscribes. Never drive the belt on a connection you aren't receiving data on, because you can't confirm it stopped.

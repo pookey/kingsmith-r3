@@ -1,6 +1,7 @@
 """Hardware smoke test of the kingsmith_r3 library's control path. MOVES THE BELT.
 
-start -> 2.0 -> 3.0 -> above-limit request (expect clamp) -> pause -> resume -> stop (end session).
+start -> 2.0 -> 3.0 -> above-limit request (expect clamp) -> pause -> resume -> stop (end session)
+-> start then stop() during the 3-2-1 countdown.
 Each step is verified against live Treadmill Data. Any failure pauses the belt.
 
 Usage: uv run tools/library_smoke.py
@@ -79,6 +80,18 @@ async def main():
             await pad.stop()
             ok = await pad.wait_for(lambda: pad.data.elapsed_s == 0 and not pad.data.moving, 5)
             check("stop() ends session, counters reset", ok, f"{pad.data}")
+
+            # START can't be cancelled during its 3-2-1 countdown: PAUSE/STOP
+            # are refused and the belt starts anyway. stop() must catch it.
+            await asyncio.sleep(2)
+            await pad.start(wait=False)
+            await asyncio.sleep(1.5)
+            check("countdown under way", pad.starting and not pad.data.moving)
+            await pad.stop()
+            ok = await pad.wait_for(lambda: pad.data.elapsed_s == 0 and not pad.data.moving, 5)
+            check("stop() during countdown halts belt and ends session", ok, f"{pad.data}")
+            await asyncio.sleep(4)
+            check("belt stays stopped", not pad.data.moving and not pad.starting, f"{pad.data}")
         except BaseException:
             say("!! failure -> pausing")
             try:
